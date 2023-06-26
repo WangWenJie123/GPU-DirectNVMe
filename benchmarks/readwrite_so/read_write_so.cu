@@ -178,7 +178,7 @@ void verify_kernel(uint64_t* orig_h, uint64_t* nvme_h, uint64_t n_elems,uint32_t
 }
 
 
-int nvme_dev_setting(uint32_t cudaDevice)
+uint32_t nvme_dev_setting(uint32_t cudaDevice)
 {
     cudaDeviceProp properties;
     if (cudaGetDeviceProperties(&properties, cudaDevice) != cudaSuccess)
@@ -192,3 +192,17 @@ int nvme_dev_setting(uint32_t cudaDevice)
     for (size_t i = 0 ; i < 1; i++)
         ctrls[i] = new Controller(ctrls_paths[i], 1, cudaDevice, 1024, 1);
 }
+
+  uint32_t nvme_dev_read()
+  {
+    fprintf(stdout, "read\n");
+
+    return 1;
+  }
+
+  uint32_t nvme_dev_write()
+  {
+    fprintf(stdout, "write\n");
+
+    return 2;
+  }
