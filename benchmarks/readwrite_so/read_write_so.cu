@@ -216,16 +216,16 @@ int main(uint32_t cudaDevice)
             delete ctrls[i];
 }
 
-  uint32_t nvme_dev_read()
-  {
-    fprintf(stdout, "read\n");
+uint32_t nvme_dev_read()
+{
+  fprintf(stdout, "read\n");
 
-    return 1;
-  }
+  return 1;
+}
 
-  uint32_t nvme_dev_write()
-  {
-    fprintf(stdout, "write\n");
+uint32_t nvme_dev_write()
+{
+  fprintf(stdout, "write\n");
 
-    return 2;
-  }
+  return 2;
+}
