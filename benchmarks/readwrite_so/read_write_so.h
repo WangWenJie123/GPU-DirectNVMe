@@ -1,9 +1,16 @@
-extern "C"{
+#ifndef __READ_WRITE_SO__
+#define __READ_WRITE_SO__
+
+#include <stdio.h>
+
+extern "C" {
  
-  uint32_t nvme_dev_setting(uint32_t cudaDevice);
+  int main(uint32_t cudaDevice);
 
   uint32_t nvme_dev_read();
 
   uint32_t nvme_dev_write();
  
 }
+
+#endif

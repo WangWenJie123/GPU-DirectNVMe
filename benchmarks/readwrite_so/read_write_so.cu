@@ -178,7 +178,7 @@ void verify_kernel(uint64_t* orig_h, uint64_t* nvme_h, uint64_t n_elems,uint32_t
 }
 
 
-uint32_t nvme_dev_setting(uint32_t cudaDevice)
+int main(uint32_t cudaDevice)
 {
     cudaDeviceProp properties;
     if (cudaGetDeviceProperties(&properties, cudaDevice) != cudaSuccess)
@@ -190,19 +190,42 @@ uint32_t nvme_dev_setting(uint32_t cudaDevice)
     cuda_err_chk(cudaSetDevice(cudaDevice));
     std::vector<Controller*> ctrls(1);
     for (size_t i = 0 ; i < 1; i++)
-        ctrls[i] = new Controller(ctrls_paths[i], 1, cudaDevice, 1024, 1);
+        ctrls[i] = new Controller(ctrls_paths[i], 1, cudaDevice, 1024, 128);
+    fprintf(stdout, "controller created\n");
+    
+    char st[15];
+    cuda_err_chk(cudaDeviceGetPCIBusId(st, 15, cudaDevice));
+    fprintf(stdout, "cudaDevice pcie: %s\n", st);
+
+    uint64_t b_size = 64;//64;
+    uint64_t g_size = (64 + b_size - 1)/b_size;//80*16;
+    uint64_t n_threads = b_size * g_size;
+
+    uint64_t page_size = 512;
+    uint64_t n_pages = 262144;
+    uint64_t total_cache_size = (page_size * n_pages);
+    uint64_t n_blocks = 2097152;
+
+    page_cache_t h_pc(page_size, n_pages, cudaDevice, ctrls[0][0], (uint64_t) 64, ctrls);
+    fprintf(stdout, "finished creating cache\n Total Cache size (MBs): %.2f\n", ((float)total_cache_size/(1024*1024)));
+
+
+
+
+    for (size_t i = 0 ; i < 1; i++)
+            delete ctrls[i];
 }
 
-  uint32_t nvme_dev_read()
-  {
-    fprintf(stdout, "read\n");
+uint32_t nvme_dev_read()
+{
+  fprintf(stdout, "read\n");
 
-    return 1;
-  }
+  return 1;
+}
 
-  uint32_t nvme_dev_write()
-  {
-    fprintf(stdout, "write\n");
+uint32_t nvme_dev_write()
+{
+  fprintf(stdout, "write\n");
 
-    return 2;
-  }
+  return 2;
+}

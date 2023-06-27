@@ -266,7 +266,7 @@ endmacro ()
 macro (make_benchmark target files)
     if (CUDA_FOUND AND NOT no_cuda)
         CUDA_ADD_LIBRARY (${target} SHARED ${files} OPTIONS ${GPU_ARCHS} -D__CUDA__) # Ugly bugly
-        target_compile_definitions (${target} PRIVATE __CUDA__)
+        target_compile_definitions (${target} PRIVATE _CUDA __CUDA__)
 
         add_dependencies (${target} libnvm)
         target_link_libraries (${target} libnvm)
@@ -347,4 +347,3 @@ if (CUDA_FOUND AND NOT no_cuda)
   #add_subdirectory ("${benchmarks_root}/scan")
   add_custom_target (benchmarks DEPENDS ${benchmark_targets})
 endif ()
-
