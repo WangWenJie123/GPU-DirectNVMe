@@ -6,9 +6,7 @@ set (CMAKE_CXX_STANDARD 11)
 
 set (THREADS_PREFER_PTHREAD_FLAG ON)
 find_package (Threads REQUIRED)
-find_package (CUDA 8.0)
-
-
+find_package (CUDA 11.7)
 
 set (DIS "/opt/DIS" CACHE PATH "SISCI install location")
 set (NVIDIA "" CACHE PATH "Path to Nvidia driver source")
@@ -250,15 +248,30 @@ endmacro ()
 
 # Make benchmark target
 # We assume all benchmarks are CUDA programs
-macro (make_benchmark target binary_name files)
+# macro (make_benchmark target binary_name files)
+#     if (CUDA_FOUND AND NOT no_cuda)
+#         cuda_add_executable (${target} EXCLUDE_FROM_ALL ${files} OPTIONS ${GPU_ARCHS} -D__CUDA__) # Ugly bugly
+#         target_compile_definitions (${target} PRIVATE __CUDA__)
+
+#         add_dependencies (${target} libnvm)
+#         target_link_libraries (${target} libnvm)
+#         target_link_libraries (${target} ${CUDA_LIBRARIES})
+#         set_target_properties (${target} PROPERTIES OUTPUT_NAME "nvm-${binary_name}")
+
+#         list (APPEND benchmark_targets "${target}")
+#         set (benchmark_targets "${benchmark_targets}" PARENT_SCOPE)
+#     endif ()
+# endmacro ()
+
+macro (make_benchmark target files)
     if (CUDA_FOUND AND NOT no_cuda)
-        cuda_add_executable (${target} EXCLUDE_FROM_ALL ${files} OPTIONS ${GPU_ARCHS} -D__CUDA__) # Ugly bugly
-        target_compile_definitions (${target} PRIVATE __CUDA__)
+        CUDA_ADD_LIBRARY (${target} SHARED ${files} OPTIONS ${GPU_ARCHS} -D__CUDA__) # Ugly bugly
+        target_compile_definitions (${target} PRIVATE _CUDA __CUDA__)
 
         add_dependencies (${target} libnvm)
         target_link_libraries (${target} libnvm)
         target_link_libraries (${target} ${CUDA_LIBRARIES})
-        set_target_properties (${target} PROPERTIES OUTPUT_NAME "nvm-${binary_name}")
+        set_target_properties (${target} PROPERTIES OUTPUT_NAME "${target}")
 
         list (APPEND benchmark_targets "${target}")
         set (benchmark_targets "${benchmark_targets}" PARENT_SCOPE)
@@ -318,19 +331,19 @@ endif ()
 
 # Add individual benchmarks
 if (CUDA_FOUND AND NOT no_cuda)
-  add_subdirectory ("${benchmarks_root}/array")
-  add_subdirectory ("${benchmarks_root}/iodepth-block")
-  add_subdirectory ("${benchmarks_root}/block")
-  add_subdirectory ("${benchmarks_root}/readwrite")
-  add_subdirectory ("${benchmarks_root}/bfs")
-  add_subdirectory ("${benchmarks_root}/cc")
-  add_subdirectory ("${benchmarks_root}/pagerank")
-  add_subdirectory ("${benchmarks_root}/sssp")
-  add_subdirectory ("${benchmarks_root}/sssp_float")
-  add_subdirectory ("${benchmarks_root}/pattern")
-  add_subdirectory ("${benchmarks_root}/cache")
-  add_subdirectory ("${benchmarks_root}/vectoradd")
+#   add_subdirectory ("${benchmarks_root}/array")
+#   add_subdirectory ("${benchmarks_root}/iodepth-block")
+#   add_subdirectory ("${benchmarks_root}/block")
+#   add_subdirectory ("${benchmarks_root}/readwrite")
+    add_subdirectory ("${benchmarks_root}/readwrite_so")
+#   add_subdirectory ("${benchmarks_root}/bfs")
+#   add_subdirectory ("${benchmarks_root}/cc")
+#   add_subdirectory ("${benchmarks_root}/pagerank")
+#   add_subdirectory ("${benchmarks_root}/sssp")
+#   add_subdirectory ("${benchmarks_root}/sssp_float")
+#   add_subdirectory ("${benchmarks_root}/pattern")
+#   add_subdirectory ("${benchmarks_root}/cache")
+#   add_subdirectory ("${benchmarks_root}/vectoradd")
   #add_subdirectory ("${benchmarks_root}/scan")
   add_custom_target (benchmarks DEPENDS ${benchmark_targets})
 endif ()
-
