@@ -1,36 +1,3 @@
-#include <cuda.h>
-#include <nvm_ctrl.h>
-#include <nvm_types.h>
-#include <nvm_queue.h>
-#include <nvm_util.h>
-#include <nvm_admin.h>
-#include <nvm_error.h>
-#include <nvm_cmd.h>
-#include <string>
-#include <stdexcept>
-#include <vector>
-#include <cstdio>
-#include <cstdint>
-#include <cstring>
-#include <map>
-#include <fcntl.h>
-#include <unistd.h>
-#include <sys/mman.h>
-#include <sys/stat.h>
-#include <ctrl.h>
-#include <buffer.h>
-#include <event.h>
-#include <queue.h>
-#include <nvm_parallel_queue.h>
-#include <nvm_io.h>
-#include <page_cache.h>
-#include <util.h>
-#include <iostream>
-#include <fstream>
-#include <byteswap.h>
-#ifdef __DIS_CLUSTER__
-#include <sisci_api.h>
-#endif
 #include "read_write_so.h"
 
 #define READ 0
@@ -42,7 +9,6 @@ using error = std::runtime_error;
 using std::string;
 
  //const char* const ctrls_paths[] = {"/dev/libnvm0", "/dev/libnvm1", "/dev/libnvm2", "/dev/libnvm3", "/dev/libnvm4", "/dev/libnvm5", "/dev/libnvm6"};
-const char* const ctrls_paths[] = {"/dev/libnvm0"};
 
 /*
 __device__ void read_data(page_cache_t* pc, QueuePair* qp, const uint64_t starting_lba, const uint64_t n_blocks, const unsigned long long pc_entry) {
@@ -178,7 +144,7 @@ void verify_kernel(uint64_t* orig_h, uint64_t* nvme_h, uint64_t n_elems,uint32_t
 }
 
 
-int main(uint32_t cudaDevice)
+int dev_set(uint32_t cudaDevice)
 {
     cudaDeviceProp properties;
     if (cudaGetDeviceProperties(&properties, cudaDevice) != cudaSuccess)
@@ -188,7 +154,6 @@ int main(uint32_t cudaDevice)
     }
 
     cuda_err_chk(cudaSetDevice(cudaDevice));
-    std::vector<Controller*> ctrls(1);
     for (size_t i = 0 ; i < 1; i++)
         ctrls[i] = new Controller(ctrls_paths[i], 1, cudaDevice, 1024, 128);
     fprintf(stdout, "controller created\n");
@@ -197,35 +162,89 @@ int main(uint32_t cudaDevice)
     cuda_err_chk(cudaDeviceGetPCIBusId(st, 15, cudaDevice));
     fprintf(stdout, "cudaDevice pcie: %s\n", st);
 
-    uint64_t b_size = 64;//64;
-    uint64_t g_size = (64 + b_size - 1)/b_size;//80*16;
-    uint64_t n_threads = b_size * g_size;
-
-    uint64_t page_size = 512;
-    uint64_t n_pages = 262144;
-    uint64_t total_cache_size = (page_size * n_pages);
-    uint64_t n_blocks = 2097152;
-
-    page_cache_t h_pc(page_size, n_pages, cudaDevice, ctrls[0][0], (uint64_t) 64, ctrls);
+    h_pc = new page_cache_t(page_size, n_pages, cudaDevice, ctrls[0][0], (uint64_t) 64, ctrls);
     fprintf(stdout, "finished creating cache\n Total Cache size (MBs): %.2f\n", ((float)total_cache_size/(1024*1024)));
 
+     //QueuePair* d_qp;
+    d_pc = (page_cache_d_t*) (h_pc->d_pc_ptr);
+    printf("n_tsteps: %lu, n_telem: %llu, n_pages:%llu\n", n_tsteps, n_telem, n_pages);
 
+    return 0;
+}
 
+  int nvme_dev_write()
+  {
+    // strat write
+    char* map_in = (char*)malloc(1024*(1024*1024));
+    for(uint32_t idx=0; idx<100; idx++) {
+        map_in[idx] = (char)(idx % 10);
+    }
+    for (uint32_t cstep =0; cstep < n_tsteps; cstep++) {
+        uint64_t cpysize = std::min(total_cache_size, uint64_t(1024));
+        printf("cstep: %lu  s_offset: %llu   cpysize: %llu pcaddr:%p, block size: %llu, grid size: %llu\n", cstep, s_offset, cpysize, h_pc->pdt.base_addr, b_size, g_size);
 
+        cuda_err_chk(cudaMemcpy(h_pc->pdt.base_addr, map_in, cpysize, cudaMemcpyHostToDevice));
+
+        cudaEventCreate(&start_write); 
+        cudaEventCreate(&stop_write);
+        cudaEventRecord(start_write, 0);
+        sequential_access_kernel<<<g_size, b_size>>>(h_pc->pdt.d_ctrls, d_pc, page_size, n_threads, //d_req_count,
+        1, 1, WRITE, s_offset, 0);
+
+        cuda_err_chk(cudaDeviceSynchronize());
+        cudaEventRecord(stop_write, 0);
+        cudaEventSynchronize(stop_write);
+
+        float wcompleted = 100*(cpysize*(cstep+1))/(cpysize);
+        cudaEventElapsedTime(&welapsed, start_write, stop_write);
+        std::cout << "Write Completed:" << wcompleted << "%   Write Time:" <<welapsed << "ms" << std::endl;
+    }
+
+    return 0;
+  }
+
+  int nvme_dev_read()
+  {
+    // start read
+    uint8_t* tmprbuff; 
+    tmprbuff = (uint8_t*) malloc(1024);
+    memset(tmprbuff, 0, (1024));
+
+    for (uint32_t cstep =0; cstep < n_tsteps; cstep++) {
+        uint64_t cpysize = std::min(total_cache_size, uint64_t(1024));
+        printf("cstep: %lu  s_offset: %llu   cpysize: %llu pcaddr:%p, block size: %llu, grid size: %llu\n", cstep, s_offset, cpysize, h_pc->pdt.base_addr, b_size, g_size);
+
+        cuda_err_chk(cudaMemset(h_pc->pdt.base_addr, 0, total_cache_size));
+        
+        cudaEventCreate(&start_read); 
+        cudaEventCreate(&stop_read);
+        cudaEventRecord(start_read, 0);
+        sequential_access_kernel<<<g_size, b_size>>>(h_pc->pdt.d_ctrls, d_pc, page_size, n_threads, //d_req_count,
+        1, 1, READ, s_offset, 0);
+        
+        cuda_err_chk(cudaDeviceSynchronize());
+        cudaEventRecord(stop_read, 0);
+        cudaEventSynchronize(stop_read);
+        cuda_err_chk(cudaMemcpy(tmprbuff+s_offset,h_pc->pdt.base_addr, cpysize, cudaMemcpyDeviceToHost));
+        
+        float rcompleted = 100*(cpysize*(cstep+1))/(cpysize);
+        cudaEventElapsedTime(&relapsed, start_read, stop_read);
+        std::cout << "Read Completed:" << rcompleted << "%   Read Time:" <<relapsed << "ms" << std::endl;
+
+        for(uint64_t item=0; item<30; item++)
+        {
+            printf("item-%d: %x\n", item, *(tmprbuff+item));
+        }
+    }
+
+    return 0;
+}
+
+int free_dev()
+{
     for (size_t i = 0 ; i < 1; i++)
             delete ctrls[i];
-}
+    delete h_pc;
 
-uint32_t nvme_dev_read()
-{
-  fprintf(stdout, "read\n");
-
-  return 1;
-}
-
-uint32_t nvme_dev_write()
-{
-  fprintf(stdout, "write\n");
-
-  return 2;
+    return 0;
 }
