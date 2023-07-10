@@ -144,8 +144,36 @@ void verify_kernel(uint64_t* orig_h, uint64_t* nvme_h, uint64_t n_elems,uint32_t
 }
 
 
-int dev_set(uint32_t cudaDevice)
+int dev_set(uint32_t cudaDevice, void* src_in)
 {
+
+    int fd_in;
+    char* input_f = (char*) src_in;
+
+    if((fd_in = open(input_f, O_RDONLY)) == -1)
+    {
+        fprintf(stderr, "Input file cannot be opened!\n");
+        return 1;
+    }
+    fstat(fd_in, &sb_in);
+
+    printf("sb_in.st_size: %ld\n", sb_in.st_size);
+
+    map_in = mmap(NULL, sb_in.st_size, PROT_READ, MAP_SHARED, fd_in, 0);
+    if(map_in == (void*)-1)
+    {
+        fprintf(stderr, "Input file map failed %d\n", map_in);
+        return 1;
+    }
+
+    n_tsteps = ceil((float)(sb_in.st_size-0)/(float)total_cache_size);
+    n_telem = ((sb_in.st_size-0)/sizeof(int64_t));
+
+    // for(int id=0; id<30; id++)
+    // {
+    //     printf("id[%d] = %.3f\n", id, ((float*)map_in)[id]);
+    // }
+
     cudaDeviceProp properties;
     if (cudaGetDeviceProperties(&properties, cudaDevice) != cudaSuccess)
     {
@@ -155,7 +183,7 @@ int dev_set(uint32_t cudaDevice)
 
     cuda_err_chk(cudaSetDevice(cudaDevice));
     for (size_t i = 0 ; i < 1; i++)
-        ctrls[i] = new Controller(ctrls_paths[i], 1, cudaDevice, 1024, 128);
+        ctrls[i] = new Controller(ctrls_paths[i], 1, cudaDevice, queueDepth, queueNum);
     fprintf(stdout, "controller created\n");
     
     char st[15];
@@ -172,18 +200,14 @@ int dev_set(uint32_t cudaDevice)
     return 0;
 }
 
-  int nvme_dev_write()
-  {
+int nvme_dev_write()
+{
     // strat write
-    char* map_in = (char*)malloc(1024*(1024*1024));
-    for(uint32_t idx=0; idx<100; idx++) {
-        map_in[idx] = (char)(idx % 10);
-    }
     for (uint32_t cstep =0; cstep < n_tsteps; cstep++) {
-        uint64_t cpysize = std::min(total_cache_size, uint64_t(1024));
+        uint64_t cpysize = std::min(total_cache_size, sb_in.st_size-s_offset);
         printf("cstep: %lu  s_offset: %llu   cpysize: %llu pcaddr:%p, block size: %llu, grid size: %llu\n", cstep, s_offset, cpysize, h_pc->pdt.base_addr, b_size, g_size);
 
-        cuda_err_chk(cudaMemcpy(h_pc->pdt.base_addr, map_in, cpysize, cudaMemcpyHostToDevice));
+        cuda_err_chk(cudaMemcpy(h_pc->pdt.base_addr, map_in+s_offset+0, cpysize, cudaMemcpyHostToDevice));
 
         cudaEventCreate(&start_write); 
         cudaEventCreate(&stop_write);
@@ -195,23 +219,23 @@ int dev_set(uint32_t cudaDevice)
         cudaEventRecord(stop_write, 0);
         cudaEventSynchronize(stop_write);
 
-        float wcompleted = 100*(cpysize*(cstep+1))/(cpysize);
+        float wcompleted = 100*(total_cache_size*(cstep+1))/(sb_in.st_size);
         cudaEventElapsedTime(&welapsed, start_write, stop_write);
         std::cout << "Write Completed:" << wcompleted << "%   Write Time:" <<welapsed << "ms" << std::endl;
+
+         s_offset = s_offset + cpysize;
     }
 
     return 0;
-  }
+}
 
-  int nvme_dev_read()
-  {
+uint64_t nvme_dev_read(uint64_t read_offset, uint64_t read_size)
+{
     // start read
-    uint8_t* tmprbuff; 
-    tmprbuff = (uint8_t*) malloc(1024);
-    memset(tmprbuff, 0, (1024));
-
+    uint64_t local_read_offset = read_offset;
+    n_tsteps = ceil((float)(read_size)/(float)total_cache_size);
     for (uint32_t cstep =0; cstep < n_tsteps; cstep++) {
-        uint64_t cpysize = std::min(total_cache_size, uint64_t(1024));
+        uint64_t cpysize = std::min(total_cache_size, read_size);
         printf("cstep: %lu  s_offset: %llu   cpysize: %llu pcaddr:%p, block size: %llu, grid size: %llu\n", cstep, s_offset, cpysize, h_pc->pdt.base_addr, b_size, g_size);
 
         cuda_err_chk(cudaMemset(h_pc->pdt.base_addr, 0, total_cache_size));
@@ -220,24 +244,23 @@ int dev_set(uint32_t cudaDevice)
         cudaEventCreate(&stop_read);
         cudaEventRecord(start_read, 0);
         sequential_access_kernel<<<g_size, b_size>>>(h_pc->pdt.d_ctrls, d_pc, page_size, n_threads, //d_req_count,
-        1, 1, READ, s_offset, 0);
+        1, 1, READ, local_read_offset, 0);
         
         cuda_err_chk(cudaDeviceSynchronize());
+
         cudaEventRecord(stop_read, 0);
         cudaEventSynchronize(stop_read);
-        cuda_err_chk(cudaMemcpy(tmprbuff+s_offset,h_pc->pdt.base_addr, cpysize, cudaMemcpyDeviceToHost));
         
-        float rcompleted = 100*(cpysize*(cstep+1))/(cpysize);
+        float rcompleted = 100*(cpysize*(cstep+1))/(read_size);
         cudaEventElapsedTime(&relapsed, start_read, stop_read);
         std::cout << "Read Completed:" << rcompleted << "%   Read Time:" <<relapsed << "ms" << std::endl;
 
-        for(uint64_t item=0; item<30; item++)
-        {
-            printf("item-%d: %x\n", item, *(tmprbuff+item));
-        }
+        local_read_offset = local_read_offset + cpysize;
+
+        // printf("cuda addr: %p\n", h_pc->pdt.base_addr);
     }
 
-    return 0;
+    return reinterpret_cast<uint64_t>(h_pc->pdt.base_addr);
 }
 
 int free_dev()

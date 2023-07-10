@@ -23,6 +23,6 @@ do
     for T in 1024 2048 4096 8192 16384 32768 65536 131072 262144 524288 1048576 2097152 4194304 8388608
     do
         echo "------------------ $T Threads ------------------"
-        ./bin/nvm-cache-bench -k $C -p $((1024*1024*2)) -P $P -n 1 -t $T -b $B -d $D -q $Q -T $PTR -e 8589934592 --gpu=$G -r $R
+        ../../build/bin/nvm-cache-bench -k $C -p $((1024*1024*2)) -P $P -n 1 -t $T -b $B -d $D -q $Q -T $PTR -e 8589934592 --gpu=$G -r $R
     done
 done
