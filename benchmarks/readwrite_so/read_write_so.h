@@ -38,31 +38,37 @@
 
 const char* const ctrls_paths[] = {"/dev/libnvm0"};
 std::vector<Controller*> ctrls(1);
+uint64_t queueNum = 32;
+uint64_t queueDepth = 64;
+uint64_t threadNum = 4096;
 
 cudaEvent_t start_read, stop_read, start_write, stop_write;
 float relapsed = 0, welapsed = 0;
 
 uint64_t b_size = 64;//64;
-uint64_t g_size = (262144 + b_size - 1)/b_size;//80*16;
+uint64_t g_size = (threadNum + b_size - 1)/b_size;//80*16;
 uint64_t n_threads = b_size * g_size;
 
-uint64_t page_size = 512;
-uint64_t n_pages = 262144;
+// data cache memory size in cuda is page_size * n_pages=32MB
+uint64_t page_size = 4096;
+uint64_t n_pages = 8192;
 uint64_t total_cache_size = (page_size * n_pages);
-uint64_t n_blocks = 2097152;
 
-uint32_t n_tsteps = ceil((float)(1024)/(float)total_cache_size);  
-uint64_t n_telem = ((1024)/sizeof(uint64_t)); 
+uint32_t n_tsteps = 0;  
+uint64_t n_telem = 0; 
 uint64_t s_offset = 0; 
 
 page_cache_t* h_pc = NULL;
 page_cache_d_t* d_pc = NULL;
 
+struct stat sb_in;
+void* map_in;
+
 extern "C" {
  
-  int dev_set(uint32_t cudaDevice);
+  int dev_set(uint32_t cudaDevice, void* src_in);
 
-  int nvme_dev_read();
+  uint64_t nvme_dev_read(uint64_t read_offset, uint64_t read_size);
 
   int nvme_dev_write();
 
