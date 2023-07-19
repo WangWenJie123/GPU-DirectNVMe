@@ -130,6 +130,44 @@ void random_access_kernel(Controller** ctrls, page_cache_t* pc,  uint32_t req_si
 }
 */
 
+__global__
+void random_access_kernel(Controller** ctrls, page_cache_d_t* pc,  uint32_t req_size, uint32_t n_reqs, uint32_t num_ctrls, uint64_t* assignment, uint64_t reqs_per_thread, uint32_t access_type) {
+    //printf("in threads\n");
+    uint64_t tid = blockIdx.x * blockDim.x + threadIdx.x;
+    uint32_t bid = blockIdx.x;
+    uint32_t smid = get_smid();
+
+    uint32_t ctrl = (tid/32) % (num_ctrls);
+    uint32_t queue = (tid/32) % (ctrls[ctrl]->n_qps);
+
+
+    if (tid < n_reqs) {
+        uint64_t start_block = (assignment[tid]*req_size) >> ctrls[ctrl]->d_qps[queue].block_size_log;
+        //uint64_t start_block = (tid*req_size) >> ctrls[ctrl]->d_qps[queue].block_size_log;
+        //start_block = tid;
+        uint64_t n_blocks = req_size >> ctrls[ctrl]->d_qps[queue].block_size_log; /// ctrls[ctrl].ns.lba_data_size;;
+        //printf("tid: %llu\tstart_block: %llu\tn_blocks: %llu\n", (unsigned long long) tid, (unsigned long long) start_block, (unsigned long long) n_blocks);
+
+        for (size_t i = 0; i < reqs_per_thread; i++) {
+            if (access_type == READ) {
+                read_data(pc, (ctrls[ctrl]->d_qps)+(queue),start_block, n_blocks, tid);
+
+            }
+            else {
+                write_data(pc, (ctrls[ctrl]->d_qps)+(queue),start_block, n_blocks, tid);
+            }
+        }
+        //read_data(pc, (ctrls[ctrl]->d_qps)+(queue),start_block, n_blocks, tid);
+        //read_data(pc, (ctrls[ctrl]->d_qps)+(queue),start_block, n_blocks, tid);
+        //read_data(pc, (ctrls[ctrl]->d_qps)+(queue),start_block, n_blocks, tid);
+        //__syncthreads();
+        //read_data(pc, (ctrls[ctrl].d_qps)+(queue),start_block*2, n_blocks, tid);
+        //printf("tid: %llu finished\n", (unsigned long long) tid);
+
+    }
+
+}
+
 __global__ 
 void verify_kernel(uint64_t* orig_h, uint64_t* nvme_h, uint64_t n_elems,uint32_t n_reqs){
         uint64_t tid = blockIdx.x*blockDim.x + threadIdx.x; 
@@ -229,43 +267,57 @@ int nvme_dev_write()
     return 0;
 }
 
-uint64_t nvme_dev_read(uint64_t read_offset, uint64_t read_size)
+uint64_t nvme_dev_read(void* read_offset, uint64_t idNUM, uint64_t read_size)
 {
     // start read
-    uint64_t local_read_offset = read_offset;
-    n_tsteps = ceil((float)(read_size)/(float)total_cache_size);
-    for (uint32_t cstep =0; cstep < n_tsteps; cstep++) {
-        uint64_t cpysize = std::min(total_cache_size, read_size);
-        printf("cstep: %lu  s_offset: %llu   cpysize: %llu pcaddr:%p, block size: %llu, grid size: %llu\n", cstep, s_offset, cpysize, h_pc->pdt.base_addr, b_size, g_size);
+    uint64_t* local_read_offset = (uint64_t*)read_offset;
+    // n_tsteps = ceil((float)(read_size)/(float)total_cache_size);
+    // for (uint32_t cstep =0; cstep < n_tsteps; cstep++) {
+    // for (uint32_t cstep = 0; cstep < idNUM; cstep ++) {
+        // uint64_t cpysize = std::min(total_cache_size, read_size);
+
+        uint64_t* d_assignment;
+        threadNum = idNUM;
+        g_size = (threadNum + b_size - 1)/b_size;
+        n_threads = b_size * g_size;
+        cuda_err_chk(cudaMalloc(&d_assignment, n_threads*sizeof(uint64_t)));
+        cuda_err_chk(cudaMemcpy(d_assignment, local_read_offset,  n_threads*sizeof(uint64_t), cudaMemcpyHostToDevice));
+
+        // uint64_t data_read_offset = local_read_offset[cstep] * read_size;
+        // printf("cstep: %lu  s_offset: %llu   cpysize: %llu pcaddr:%p, block size: %llu, grid size: %llu\n", cstep, s_offset, cpysize, h_pc->pdt.base_addr, b_size, g_size);
 
         cuda_err_chk(cudaMemset(h_pc->pdt.base_addr, 0, total_cache_size));
         
         cudaEventCreate(&start_read); 
         cudaEventCreate(&stop_read);
         cudaEventRecord(start_read, 0);
-        sequential_access_kernel<<<g_size, b_size>>>(h_pc->pdt.d_ctrls, d_pc, page_size, n_threads, //d_req_count,
-        1, 1, READ, local_read_offset, 0);
+        // sequential_access_kernel<<<g_size, b_size>>>(h_pc->pdt.d_ctrls, d_pc, page_size, n_threads, //d_req_count,
+        // 1, 1, READ, data_read_offset, 0);
+
+        random_access_kernel<<<g_size, b_size>>>(h_pc->pdt.d_ctrls, d_pc, page_size,
+        n_threads, 1, d_assignment, 1, READ);
         
         cuda_err_chk(cudaDeviceSynchronize());
 
         cudaEventRecord(stop_read, 0);
         cudaEventSynchronize(stop_read);
         
-        float rcompleted = 100*(cpysize*(cstep+1))/(read_size);
+        // float rcompleted = 100*(cpysize*(cstep+1))/(read_size);
         cudaEventElapsedTime(&relapsed, start_read, stop_read);
-        std::cout << "Read Completed:" << rcompleted << "%   Read Time:" <<relapsed << "ms" << std::endl;
+        // std::cout << "Read Completed:" << rcompleted << "%   Read Time:" <<relapsed << "ms" << std::endl;
+        std::cout << "Read Time:" <<relapsed << "ms" << std::endl;
 
-        local_read_offset = local_read_offset + cpysize;
+        // local_read_offset = local_read_offset + cpysize;
 
         // printf("cuda addr: %p\n", h_pc->pdt.base_addr);
-    }
+    // }
 
     return reinterpret_cast<uint64_t>(h_pc->pdt.base_addr);
 }
 
 int free_dev()
 {
-    for (size_t i = 0 ; i < 1; i++)
+    for (size_t i = 0; i < 1; i++)
             delete ctrls[i];
     delete h_pc;
 

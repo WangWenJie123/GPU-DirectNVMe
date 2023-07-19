@@ -13,12 +13,20 @@ set_val = nvme_rwlib.dev_set(0, feature_data_path)
 
 # write_val = nvme_rwlib.nvme_dev_write()
 
-read_val = nvme_rwlib.nvme_dev_read(128*4, 4096)
+feature_size = 128*4
 
-mem = UnownedMemory(read_val, 4096, None)
+# create id array and pass to cuda api
+id_len = 1000
+id_list = []
+for i in range(id_len):
+    id_list.append(i)
+id_list_ptr = (c_uint64*id_len)(*id_list)
+read_val = nvme_rwlib.nvme_dev_read(id_list_ptr, id_len, feature_size)
+
+mem = UnownedMemory(read_val, feature_size*id_len, None)
 memptr = MemoryPointer(mem, 0)
 
-cuda_data = cp.ndarray(shape=1024, dtype=np.float32, memptr=memptr)
+cuda_data = cp.ndarray(shape=int(feature_size*id_len/4), dtype=np.float32, memptr=memptr)
     
 torch_data = torch.utils.dlpack.from_dlpack(cuda_data.toDlpack()).float()
 
