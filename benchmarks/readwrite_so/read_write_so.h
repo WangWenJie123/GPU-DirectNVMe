@@ -50,8 +50,8 @@ uint64_t g_size = (threadNum + b_size - 1)/b_size;//80*16;
 uint64_t n_threads = b_size * g_size;
 
 // data cache memory size in cuda is page_size * n_pages=32MB
-uint64_t page_size = 4096;
-uint64_t n_pages = 8192;
+uint64_t page_size = 128*4;
+uint64_t n_pages = 81920;
 uint64_t total_cache_size = (page_size * n_pages);
 
 uint32_t n_tsteps = 0;  
@@ -68,7 +68,7 @@ extern "C" {
  
   int dev_set(uint32_t cudaDevice, void* src_in);
 
-  uint64_t nvme_dev_read(uint64_t read_offset, uint64_t read_size);
+  uint64_t nvme_dev_read(void* read_offset, uint64_t idNUM, uint64_t read_size);
 
   int nvme_dev_write();
 
